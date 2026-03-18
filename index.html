@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>SE Sword Master Pro</title>
+    <title>Sword Master: Avoid the Red!</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -13,26 +13,28 @@
         #timer { font-size: 1.8rem; font-weight: 800; }
         #score { font-size: 1.2rem; color: #00ffcc; }
         
-        /* Flash Effect Overlay */
-        #flash {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: white; opacity: 0; z-index: 50; pointer-events: none;
-        }
+        #flash { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: white; opacity: 0; z-index: 50; pointer-events: none; transition: opacity 0.05s; }
+        #death-flash { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: red; opacity: 0; z-index: 51; pointer-events: none; }
 
         #start-overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0,0,0,0.9); display: flex; flex-direction: column;
-            justify-content: center; align-items: center; z-index: 1000; color: white;
+            justify-content: center; align-items: center; z-index: 1000; color: white; text-align: center;
         }
-        button { padding: 15px 40px; font-size: 1.2rem; border-radius: 30px; border: none; background: #00ffcc; font-weight: bold; }
+        button { padding: 15px 40px; font-size: 1.2rem; border-radius: 30px; border: none; background: #00ffcc; font-weight: bold; margin-top: 20px; }
+        .warning { color: #ff4444; font-weight: bold; margin-top: 10px; }
     </style>
 </head>
 <body>
 
 <div id="flash"></div>
+<div id="death-flash"></div>
+
 <div id="start-overlay">
-    <h2>Sword Master</h2>
-    <button id="start-btn">TAP TO PLAY</button>
+    <h1>Sword Master</h1>
+    <p>Slice the <span style="color:#00ffcc">CYAN</span> shapes.<br>
+    <span class="warning">AVOID THE RED SPIKY BOMBS!</span></p>
+    <button id="start-btn">START SESSION</button>
 </div>
 
 <div id="ui">
@@ -46,9 +48,8 @@
     let score = 0, timeLeft = 60, gameActive = false;
     const targets = [];
     const trailPoints = [];
-    const MAX_TRAIL_POINTS = 10;
+    const MAX_TRAIL_POINTS = 8;
 
-    // --- THREE.JS SETUP ---
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
     const renderer = new THREE.WebGLRenderer({ antialias: false });
@@ -56,49 +57,40 @@
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
 
-    // Light
     const light = new THREE.PointLight(0xffffff, 1.5);
     light.position.set(0, 5, 5);
     scene.add(light, new THREE.AmbientLight(0x404040));
 
-    // --- SMALLER SWORD ---
+    // Sword
     const swordGroup = new THREE.Group();
-    // Reduced length to 1.2 (from 2.5) for a shorter, snappier blade
-    const bladeGeo = new THREE.BoxGeometry(0.08, 1.2, 0.08);
-    const bladeMat = new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00ffff });
-    const blade = new THREE.Mesh(bladeGeo, bladeMat);
-    blade.position.y = 0.6; // Adjust pivot
+    const blade = new THREE.Mesh(
+        new THREE.BoxGeometry(0.08, 1.2, 0.08),
+        new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00ffff })
+    );
+    blade.position.y = 0.6;
     swordGroup.add(blade);
     scene.add(swordGroup);
 
-    // --- TRAIL SETUP ---
+    // Trail
     const trailGeo = new THREE.PlaneGeometry(1, 1, 1, MAX_TRAIL_POINTS - 1);
-    const trailMat = new THREE.MeshBasicMaterial({ 
-        color: 0x00ffff, 
-        transparent: true, 
-        opacity: 0.4, 
-        side: THREE.DoubleSide 
-    });
+    const trailMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.3, side: THREE.DoubleSide });
     const trailMesh = new THREE.Mesh(trailGeo, trailMat);
     trailMesh.frustumCulled = false;
     scene.add(trailMesh);
 
     camera.position.z = 5;
 
-    // --- FLASH FUNCTION ---
-    function triggerFlash() {
-        const flash = document.getElementById('flash');
-        flash.style.opacity = '0.8';
-        setTimeout(() => { flash.style.opacity = '0'; }, 50);
+    function triggerFlash(color = 'white') {
+        const el = color === 'white' ? document.getElementById('flash') : document.getElementById('death-flash');
+        el.style.opacity = '0.8';
+        setTimeout(() => { el.style.opacity = '0'; }, 100);
     }
 
-    // --- HAND TRACKING ---
-    const videoElement = document.getElementById('input_video');
     const hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
-    
     hands.setOptions({ maxNumHands: 1, modelComplexity: 0, minDetectionConfidence: 0.5 });
     
     hands.onResults((results) => {
+        if (!gameActive) return;
         if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
             const hand = results.multiHandLandmarks[0];
             const tip = hand[8];
@@ -110,7 +102,6 @@
             swordGroup.position.lerp(new THREE.Vector3(x, y, 0), 0.4);
             swordGroup.rotation.z = Math.atan2(tip.x - wrist.x, tip.y - wrist.y);
 
-            // Trail Logic: Save the blade tip position
             const currentTip = new THREE.Vector3();
             blade.getWorldPosition(currentTip);
             trailPoints.unshift(currentTip.clone());
@@ -125,11 +116,10 @@
         if (trailPoints.length < 2) return;
         const positions = trailMesh.geometry.attributes.position.array;
         for (let i = 0; i < trailPoints.length; i++) {
-            // We create a "ribbon" by slightly offsetting x/z for each point
-            positions[i * 6] = trailPoints[i].x - 0.1;
+            positions[i * 6] = trailPoints[i].x - 0.05;
             positions[i * 6 + 1] = trailPoints[i].y;
             positions[i * 6 + 2] = trailPoints[i].z;
-            positions[i * 6 + 3] = trailPoints[i].x + 0.1;
+            positions[i * 6 + 3] = trailPoints[i].x + 0.05;
             positions[i * 6 + 4] = trailPoints[i].y;
             positions[i * 6 + 5] = trailPoints[i].z;
         }
@@ -138,19 +128,32 @@
 
     function checkCollisions(tipPos) {
         for (let i = targets.length - 1; i >= 0; i--) {
-            if (tipPos.distanceTo(targets[i].position) < 0.6) {
-                triggerFlash();
-                scene.remove(targets[i]);
-                targets.splice(i, 1);
-                score += 10;
-                document.getElementById('score').innerText = score;
+            const t = targets[i];
+            if (tipPos.distanceTo(t.position) < 0.6) {
+                if (t.userData.isBomb) {
+                    gameOver("BOMB HIT!");
+                } else {
+                    triggerFlash('white');
+                    scene.remove(t);
+                    targets.splice(i, 1);
+                    score += 10;
+                    document.getElementById('score').innerText = score;
+                }
             }
         }
     }
 
-    // --- CAMERA & START ---
-    const cameraControl = new Camera(videoElement, {
-        onFrame: async () => { if(gameActive) await hands.send({image: videoElement}); },
+    function gameOver(reason) {
+        gameActive = false;
+        triggerFlash('red');
+        setTimeout(() => {
+            alert(`${reason}\nFinal Score: ${score}`);
+            location.reload();
+        }, 200);
+    }
+
+    const cameraControl = new Camera(document.getElementById('input_video'), {
+        onFrame: async () => { if(gameActive) await hands.send({image: document.getElementById('input_video')}); },
         width: 480, height: 360
     });
 
@@ -164,23 +167,38 @@
 
     function spawnLoop() {
         if (!gameActive) return;
-        const mesh = new THREE.Mesh(
-            new THREE.IcosahedronGeometry(0.35, 0),
-            new THREE.MeshPhongMaterial({ color: 0xff3300 })
-        );
+        
+        const isBomb = Math.random() > 0.75; // 25% chance of a bomb
+        let geom, mat;
+
+        if (isBomb) {
+            // Bomb: Spiky Red Tetrahedron
+            geom = new THREE.TetrahedronGeometry(0.4, 0);
+            mat = new THREE.MeshPhongMaterial({ color: 0xff0000, emissive: 0x330000 });
+        } else {
+            // Target: Smooth Cyan Icosahedron
+            geom = new THREE.IcosahedronGeometry(0.35, 1);
+            mat = new THREE.MeshPhongMaterial({ color: 0x00ccff });
+        }
+
+        const mesh = new THREE.Mesh(geom, mat);
+        mesh.userData.isBomb = isBomb;
         mesh.position.set((Math.random() - 0.5) * 5, -4, 0);
-        mesh.velocity = new THREE.Vector3((Math.random() - 0.5) * 0.03, 0.13, 0);
+        mesh.velocity = new THREE.Vector3((Math.random() - 0.5) * 0.03, 0.12 + (Math.random() * 0.03), 0);
+        
         scene.add(mesh);
         targets.push(mesh);
-        setTimeout(spawnLoop, 1000);
+        
+        const nextSpawn = isBomb ? 1500 : 800;
+        setTimeout(spawnLoop, nextSpawn);
     }
 
     function startTimer() {
         const ticker = setInterval(() => {
+            if (!gameActive) { clearInterval(ticker); return; }
             if (--timeLeft <= 0) {
-                gameActive = false;
-                alert("Time's up! Score: " + score);
-                location.reload();
+                gameOver("TIME UP!");
+                clearInterval(ticker);
             }
             document.getElementById('timer').innerText = timeLeft;
         }, 1000);
@@ -190,7 +208,9 @@
         requestAnimationFrame(animate);
         targets.forEach((t, i) => {
             t.position.add(t.velocity);
-            t.velocity.y -= 0.0025; // Gravity
+            t.velocity.y -= 0.002;
+            t.rotation.x += 0.05;
+            t.rotation.y += 0.05;
             if (t.position.y < -5) {
                 scene.remove(t);
                 targets.splice(i, 1);

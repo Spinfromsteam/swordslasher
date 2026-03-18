@@ -28,9 +28,6 @@
             box-sizing: border-box;
         }
         h1 { color: #00ffff; font-size: 3rem; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 3px; }
-        .desc-table { margin: 20px 0; font-size: 0.9rem; line-height: 1.4; }
-        .desc-item { margin-bottom: 10px; display: flex; align-items: center; }
-        .icon { width: 20px; height: 20px; margin-right: 15px; border-radius: 4px; flex-shrink: 0; }
         button { padding: 18px 50px; font-size: 1.4rem; border-radius: 40px; border: none; background: #00ffff; color: black; font-weight: bold; cursor: pointer; }
     </style>
 </head>
@@ -44,12 +41,7 @@
 
 <div id="start-overlay">
     <h1>Slash em</h1>
-    <div class="desc-table">
-        <div class="desc-item"><div class="icon" style="background: #00ffff;"></div><span><b>Cyan:</b> +10 Pts. Miss: -5 Pts.</span></div>
-        <div class="desc-item"><div class="icon" style="background: #ff0000; clip-path: polygon(50% 0%, 0% 100%, 100% 100%);"></div><span><b>Red:</b> Bomb! -1 Heart.</span></div>
-        <div class="desc-item"><div class="icon" style="background: #00ff00;"></div><span><b>Green:</b> Heal! (Spawns more late-game)</span></div>
-        <div class="desc-item"><div class="icon" style="background: #FFD700; border-radius: 50%;"></div><span><b>Gold:</b> Immunity! (Spawns more late-game)</span></div>
-    </div>
+    <p>Slice objects with your finger!</p>
     <button id="start-btn">PLAY NOW</button>
 </div>
 
@@ -62,21 +54,15 @@
 
 <script>
     let score = 0, timeLeft = 60, lives = 3, gameActive = false;
-    let isRadiant = false;
+    let isRadiant = false, bombChance = 0.1, healChance = 0.005, radiantChance = 0.002;
     
-    // Rarity variables that evolve over time
-    let bombChance = 0.1; 
-    let healChance = 0.005;   // Starts very low (0.5%)
-    let radiantChance = 0.002; // Starts ultra low (0.2%)
-
-    const targets = [];
-    const trailPoints = [];
+    const targets = [], particles = [], trailPoints = [];
     const MAX_TRAIL_POINTS = 12;
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
     const renderer = new THREE.WebGLRenderer({ antialias: false });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.2));
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
     scene.add(new THREE.HemisphereLight(0xffffff, 0x000000, 1.2));
@@ -84,20 +70,30 @@
     // --- SWORD SETUP ---
     const swordGroup = new THREE.Group();
     const bladeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0x00ffff, emissiveIntensity: 2.5 });
-    const bladeGeo = new THREE.BoxGeometry(0.08, 1.3, 0.04);
-    bladeGeo.translate(0, 0.65, 0); 
+    const bladeGeo = new THREE.BoxGeometry(0.08, 1.5, 0.04);
+    bladeGeo.translate(0, 0.75, 0); // Origin at the handle
     const blade = new THREE.Mesh(bladeGeo, bladeMat);
-    const guard = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.06, 0.1), new THREE.MeshStandardMaterial({color: 0xFFD700}));
-    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.2), new THREE.MeshStandardMaterial({color: 0x442200}));
-    handle.position.y = -0.1;
-    swordGroup.add(blade, guard, handle);
+    swordGroup.add(blade);
     scene.add(swordGroup);
 
-    const trailMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.4, side: THREE.DoubleSide });
+    const trailMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.5, side: THREE.DoubleSide });
     const trailMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1, 1, MAX_TRAIL_POINTS - 1), trailMat);
-    trailMesh.frustumCulled = false;
     scene.add(trailMesh);
     camera.position.z = 5;
+
+    // --- PARTICLE SYSTEM ---
+    function createSplat(pos, color) {
+        for(let i=0; i<8; i++) {
+            const pGeo = new THREE.BoxGeometry(0.1, 0.1, 0.1);
+            const pMat = new THREE.MeshBasicMaterial({ color: color });
+            const p = new THREE.Mesh(pGeo, pMat);
+            p.position.copy(pos);
+            p.userData.velocity = new THREE.Vector3((Math.random()-0.5)*0.2, (Math.random()-0.5)*0.2, (Math.random()-0.5)*0.2);
+            p.userData.life = 1.0;
+            scene.add(p);
+            particles.push(p);
+        }
+    }
 
     function triggerEffect(id, duration = 100, maxOpacity = 0.3) {
         const el = document.getElementById(id);
@@ -124,31 +120,35 @@
     hands.onResults((results) => {
         if (!gameActive || !results.multiHandLandmarks?.length) return;
         const hand = results.multiHandLandmarks[0];
-        const wrist = hand[0];
-        const indexTip = hand[8];
+        
+        const tip = hand[8];  // Index Tip
+        const base = hand[5]; // Index Knuckle
+        
+        // Position at tip
+        const x = (tip.x - 0.5) * -8;
+        const y = (tip.y - 0.5) * -6;
+        swordGroup.position.lerp(new THREE.Vector3(x, y, 0), 0.5);
 
-        const x = (indexTip.x - 0.5) * -8;
-        const y = (indexTip.y - 0.5) * -6;
-        swordGroup.position.lerp(new THREE.Vector3(x, y, 0), 0.4);
-
-        // Point AWAY from wrist
-        const angle = Math.atan2(indexTip.x - wrist.x, indexTip.y - wrist.y) + Math.PI;
+        // ROTATION: Use vector from knuckle to tip for direction
+        const dx = tip.x - base.x;
+        const dy = tip.y - base.y;
+        const angle = Math.atan2(-dx, -dy); 
         swordGroup.rotation.z = angle;
 
-        const tipPos = new THREE.Vector3(0, 1.3, 0);
-        tipPos.applyMatrix4(blade.matrixWorld);
-        trailPoints.unshift(tipPos.clone());
+        const tipWorld = new THREE.Vector3(0, 1.5, 0);
+        tipWorld.applyMatrix4(blade.matrixWorld);
+        trailPoints.unshift(tipWorld.clone());
         if (trailPoints.length > MAX_TRAIL_POINTS) trailPoints.pop();
         updateTrail();
-        checkCollisions(tipPos);
+        checkCollisions(tipWorld);
     });
 
     function updateTrail() {
         if (trailPoints.length < 2) return;
         const positions = trailMesh.geometry.attributes.position.array;
         for (let i = 0; i < trailPoints.length; i++) {
-            positions[i * 6] = trailPoints[i].x - 0.08; positions[i * 6 + 1] = trailPoints[i].y; positions[i * 6 + 2] = trailPoints[i].z;
-            positions[i * 6 + 3] = trailPoints[i].x + 0.08; positions[i * 6 + 4] = trailPoints[i].y; positions[i * 6 + 5] = trailPoints[i].z;
+            positions[i * 6] = trailPoints[i].x - 0.05; positions[i * 6 + 1] = trailPoints[i].y; positions[i * 6 + 2] = trailPoints[i].z;
+            positions[i * 6 + 3] = trailPoints[i].x + 0.05; positions[i * 6 + 4] = trailPoints[i].y; positions[i * 6 + 5] = trailPoints[i].z;
         }
         trailMesh.geometry.attributes.position.needsUpdate = true;
     }
@@ -156,11 +156,15 @@
     function checkCollisions(tipPos) {
         for (let i = targets.length - 1; i >= 0; i--) {
             const t = targets[i];
-            if (tipPos.distanceTo(t.position) < 0.7) {
+            if (tipPos.distanceTo(t.position) < 0.8) {
+                const color = t.material.color.getHex();
+                createSplat(t.position, color);
+
                 if (t.userData.isRadiant) { activateRadiant(); triggerEffect('flash-white', 200, 0.5); }
                 else if (t.userData.isHeal) { if (lives < 3) lives++; triggerEffect('flash-green', 200, 0.4); document.getElementById('lives').innerText = "❤".repeat(lives); }
-                else if (t.userData.isBomb) { if (!isRadiant) { lives--; triggerEffect('flash-red', 150, 0.6); document.getElementById('lives').innerText = "❤".repeat(lives); if (lives <= 0) endGame("OUT OF LIVES"); } }
+                else if (t.userData.isBomb) { if (!isRadiant) { lives--; triggerEffect('flash-red', 150, 0.6); document.getElementById('lives').innerText = "❤".repeat(lives); if (lives <= 0) endGame("GAME OVER"); } }
                 else { triggerEffect('flash-white', 80, 0.3); score += 10; }
+                
                 scene.remove(t); targets.splice(i, 1);
                 document.getElementById('score').innerText = score;
             }
@@ -185,59 +189,41 @@
     function spawnLoop() {
         if (!gameActive) return;
         const rand = Math.random();
-        
-        // Dynamic Spawn Logic
         const isRadiantSpawn = rand < radiantChance;
         const isHealSpawn = !isRadiantSpawn && rand < (radiantChance + healChance);
         const isBombSpawn = !isRadiantSpawn && !isHealSpawn && rand < (radiantChance + healChance + bombChance);
         
         let geom, mat;
-        if (isRadiantSpawn) {
-            geom = new THREE.SphereGeometry(0.3, 16, 16);
-            mat = new THREE.MeshStandardMaterial({ color: 0xFFD700, emissive: 0xFFD700, emissiveIntensity: 2 });
-        } else if (isHealSpawn) {
-            geom = new THREE.BoxGeometry(0.4, 0.4, 0.4);
-            mat = new THREE.MeshStandardMaterial({ color: 0x00ff00, emissive: 0x00ff00, emissiveIntensity: 1 });
-        } else if (isBombSpawn) {
-            geom = new THREE.ConeGeometry(0.4, 0.7, 4);
-            mat = new THREE.MeshPhongMaterial({ color: 0xff0000 });
-        } else {
-            geom = new THREE.IcosahedronGeometry(0.35, 1);
-            mat = new THREE.MeshPhongMaterial({ color: 0x00ffff });
-        }
+        if (isRadiantSpawn) { geom = new THREE.SphereGeometry(0.3, 12, 12); mat = new THREE.MeshStandardMaterial({ color: 0xFFD700, emissive: 0xFFD700, emissiveIntensity: 2 }); }
+        else if (isHealSpawn) { geom = new THREE.BoxGeometry(0.4, 0.4, 0.4); mat = new THREE.MeshStandardMaterial({ color: 0x00ff00, emissive: 0x00ff00, emissiveIntensity: 1 }); }
+        else if (isBombSpawn) { geom = new THREE.ConeGeometry(0.4, 0.7, 4); mat = new THREE.MeshPhongMaterial({ color: 0xff0000 }); }
+        else { geom = new THREE.IcosahedronGeometry(0.35, 1); mat = new THREE.MeshPhongMaterial({ color: 0x00ffff }); }
 
         const mesh = new THREE.Mesh(geom, mat);
         mesh.userData = { isBomb: isBombSpawn, isRadiant: isRadiantSpawn, isHeal: isHealSpawn };
         mesh.position.set((Math.random() - 0.5) * 5, -4, 0);
-        mesh.velocity = new THREE.Vector3((Math.random() - 0.5) * 0.03, 0.165, 0);
+        mesh.velocity = new THREE.Vector3((Math.random() - 0.5) * 0.03, 0.17, 0);
         scene.add(mesh);
         targets.push(mesh);
-        
-        setTimeout(spawnLoop, Math.max(380, 700 - (60 - timeLeft) * 6));
+        setTimeout(spawnLoop, Math.max(350, 700 - (60 - timeLeft) * 7));
     }
 
     function startTimer() {
         const ticker = setInterval(() => {
-            if (!gameActive) { clearInterval(ticker); return; }
+            if (!gameActive) return;
             timeLeft--;
             document.getElementById('timer').innerText = timeLeft;
-            
-            // Progression: Chances increase as time goes on
             const elapsed = 60 - timeLeft;
             bombChance = Math.min(0.45, 0.1 + elapsed * 0.009);
-            
-            // Healing starts at 0.5% and maxes at 4%
             healChance = Math.min(0.04, 0.005 + elapsed * 0.0008);
-            
-            // Radiant starts at 0.2% and maxes at 1.5%
             radiantChance = Math.min(0.015, 0.002 + elapsed * 0.0003);
-
             if (timeLeft <= 0) { endGame("TIME UP"); clearInterval(ticker); }
         }, 1000);
     }
 
     function animate() {
         requestAnimationFrame(animate);
+        // Targets
         for (let i = targets.length - 1; i >= 0; i--) {
             const t = targets[i];
             t.position.add(t.velocity);
@@ -251,6 +237,14 @@
                 }
                 scene.remove(t); targets.splice(i, 1);
             }
+        }
+        // Particles
+        for (let i = particles.length - 1; i >= 0; i--) {
+            const p = particles[i];
+            p.position.add(p.userData.velocity);
+            p.userData.life -= 0.04;
+            p.scale.setScalar(p.userData.life);
+            if(p.userData.life <= 0) { scene.remove(p); particles.splice(i, 1); }
         }
         renderer.render(scene, camera);
     }

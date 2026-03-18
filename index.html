@@ -13,7 +13,6 @@
         #timer { font-size: 1.8rem; font-weight: 800; }
         #score { font-size: 1.2rem; color: #00ffcc; }
         #lives { font-size: 1.5rem; color: #ff4444; letter-spacing: 2px; }
-        #powerup-ui { position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%); color: #FFD700; font-weight: bold; font-size: 1.2rem; display: none; z-index: 100; }
         .overlay-fx { position: fixed; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; z-index: 50; pointer-events: none; }
         #flash-white { background: white; }
         #flash-red { background: red; }
@@ -29,12 +28,11 @@
 <div id="flash-red" class="overlay-fx"></div>
 <div id="flash-green" class="overlay-fx"></div>
 <div id="tint-orange" class="overlay-fx"></div>
-<div id="powerup-ui">RADIANT IMMUNITY!</div>
 
 <div id="start-overlay">
     <h1>Slash em</h1>
-    <p>Use your finger to swing the blade!<br>Objects now bounce off the walls.</p>
-    <button id="start-btn">START SESSION</button>
+    <p>Agile Shortsword Mode<br>Objects Bounce Off Walls!</p>
+    <button id="start-btn">START</button>
 </div>
 
 <div id="ui">
@@ -48,7 +46,7 @@
     let score = 0, timeLeft = 60, lives = 3, gameActive = false;
     let isRadiant = false, bombChance = 0.1, healChance = 0.005, radiantChance = 0.002;
     const targets = [], particles = [], trailPoints = [];
-    const MAX_TRAIL_POINTS = 10;
+    const MAX_TRAIL_POINTS = 8;
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
@@ -58,31 +56,36 @@
     document.body.appendChild(renderer.domElement);
     scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.2));
 
-    // --- SWORD DESIGN ---
+    // --- SMALLER LIGHT GRAY SWORD ---
     const swordGroup = new THREE.Group();
+    const bladeMat = new THREE.MeshStandardMaterial({ 
+        color: 0xd3d3d3, // Light Gray
+        metalness: 0.5, 
+        roughness: 0.3,
+        emissive: 0xffffff,
+        emissiveIntensity: 0.2 
+    });
     
-    // Blade (Metallic Silver)
-    const bladeGeo = new THREE.BoxGeometry(0.12, 1.8, 0.03);
-    bladeGeo.translate(0, 0.9, 0); 
-    const bladeMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.8, roughness: 0.2, emissive: 0x00ffff, emissiveIntensity: 0.5 });
+    // Blade: Reduced height from 1.8 to 1.1
+    const bladeGeo = new THREE.BoxGeometry(0.1, 1.1, 0.03);
+    bladeGeo.translate(0, 0.55, 0); 
     const blade = new THREE.Mesh(bladeGeo, bladeMat);
     
-    // Crossguard
-    const guard = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.1, 0.15), new THREE.MeshStandardMaterial({color: 0x888888, metalness: 0.9}));
+    // Small Guard
+    const guard = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.06, 0.1), new THREE.MeshStandardMaterial({color: 0xaaaaaa}));
     
-    // Handle (Leather-ish Brown)
-    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.4), new THREE.MeshStandardMaterial({color: 0x3d2b1f}));
-    handle.position.y = -0.2;
+    // Small Handle
+    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.25), new THREE.MeshStandardMaterial({color: 0x222222}));
+    handle.position.y = -0.12;
 
     swordGroup.add(blade, guard, handle);
     scene.add(swordGroup);
 
-    const trailMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.4, side: THREE.DoubleSide });
+    const trailMat = new THREE.MeshBasicMaterial({ color: 0xeeeeee, transparent: true, opacity: 0.3, side: THREE.DoubleSide });
     const trailMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1, 1, MAX_TRAIL_POINTS - 1), trailMat);
     scene.add(trailMesh);
     camera.position.z = 5;
 
-    // --- UTILITIES ---
     function triggerEffect(id, duration = 100, maxOpacity = 0.3) {
         const el = document.getElementById(id);
         el.style.opacity = maxOpacity;
@@ -90,18 +93,17 @@
     }
 
     function createSplat(pos, color) {
-        for(let i=0; i<6; i++) {
-            const p = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), new THREE.MeshBasicMaterial({ color: color }));
+        for(let i=0; i<5; i++) {
+            const p = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.08), new THREE.MeshBasicMaterial({ color: color }));
             p.position.copy(pos);
-            p.userData = { velocity: new THREE.Vector3((Math.random()-0.5)*0.15, (Math.random()-0.5)*0.15, (Math.random()-0.5)*0.15), life: 1.0 };
+            p.userData = { velocity: new THREE.Vector3((Math.random()-0.5)*0.12, (Math.random()-0.5)*0.12, (Math.random()-0.5)*0.12), life: 1.0 };
             particles.push(p); scene.add(p);
         }
     }
 
-    // Line-Segment Collision
     function checkBladeCollision(targetPos, radius) {
         const start = swordGroup.position.clone();
-        const end = new THREE.Vector3(0, 1.8, 0).applyMatrix4(swordGroup.matrixWorld);
+        const end = new THREE.Vector3(0, 1.1, 0).applyMatrix4(swordGroup.matrixWorld);
         const line = new THREE.Line3(start, end);
         const closestPoint = new THREE.Vector3();
         line.closestPointToPoint(targetPos, true, closestPoint);
@@ -120,20 +122,19 @@
         swordGroup.position.lerp(new THREE.Vector3(x, y, 0), 0.6);
         swordGroup.rotation.z = Math.atan2(-(tip.x - base.x), -(tip.y - base.y));
 
-        const tipWorld = new THREE.Vector3(0, 1.8, 0).applyMatrix4(swordGroup.matrixWorld);
+        const tipWorld = new THREE.Vector3(0, 1.1, 0).applyMatrix4(swordGroup.matrixWorld);
         trailPoints.unshift(tipWorld.clone());
         if (trailPoints.length > MAX_TRAIL_POINTS) trailPoints.pop();
         updateTrail();
 
         for (let i = targets.length - 1; i >= 0; i--) {
-            if (checkBladeCollision(targets[i].position, 0.6)) {
+            if (checkBladeCollision(targets[i].position, 0.55)) {
                 const t = targets[i];
                 createSplat(t.position, t.material.color.getHex());
                 if (t.userData.isRadiant) { 
                     isRadiant = true; 
                     bladeMat.emissive.setHex(0xFFD700); 
-                    document.getElementById('powerup-ui').style.display = 'block';
-                    setTimeout(() => { isRadiant = false; bladeMat.emissive.setHex(0x00ffff); document.getElementById('powerup-ui').style.display = 'none'; }, 5000);
+                    setTimeout(() => { isRadiant = false; bladeMat.emissive.setHex(0xffffff); }, 5000);
                 } 
                 else if (t.userData.isHeal) { if(lives < 3) lives++; triggerEffect('flash-green', 200, 0.4); }
                 else if (t.userData.isBomb) { if(!isRadiant) { lives--; triggerEffect('flash-red', 150, 0.6); if(lives<=0) location.reload(); } }
@@ -150,8 +151,8 @@
         if (trailPoints.length < 2) return;
         const positions = trailMesh.geometry.attributes.position.array;
         for (let i = 0; i < trailPoints.length; i++) {
-            positions[i*6] = trailPoints[i].x-0.05; positions[i*6+1] = trailPoints[i].y;
-            positions[i*6+3] = trailPoints[i].x+0.05; positions[i*6+4] = trailPoints[i].y;
+            positions[i*6] = trailPoints[i].x-0.03; positions[i*6+1] = trailPoints[i].y;
+            positions[i*6+3] = trailPoints[i].x+0.03; positions[i*6+4] = trailPoints[i].y;
         }
         trailMesh.geometry.attributes.position.needsUpdate = true;
     }
@@ -160,16 +161,16 @@
         if (!gameActive) return;
         const rand = Math.random();
         const isR = rand < radiantChance, isH = !isR && rand < (radiantChance + healChance), isB = !isR && !isH && rand < (radiantChance + healChance + bombChance);
-        
         const mat = new THREE.MeshPhongMaterial({ color: isR ? 0xFFD700 : isH ? 0x00ff00 : isB ? 0xff0000 : 0x00ffff });
-        const mesh = new THREE.Mesh(isB ? new THREE.ConeGeometry(0.4, 0.7, 4) : isH ? new THREE.BoxGeometry(0.4,0.4,0.4) : new THREE.IcosahedronGeometry(0.35, 1), mat);
+        const mesh = new THREE.Mesh(isB ? new THREE.ConeGeometry(0.35, 0.6, 4) : isH ? new THREE.BoxGeometry(0.35,0.35,0.35) : new THREE.IcosahedronGeometry(0.3, 1), mat);
         
         mesh.userData = { isBomb: isB, isRadiant: isR, isHeal: isH };
-        mesh.position.set((Math.random()-0.5)*6, -4, 0);
-        mesh.velocity = new THREE.Vector3((Math.random()-0.5)*0.08, 0.18, 0);
+        // Spawn strictly within visible center
+        mesh.position.set((Math.random()-0.5)*5, -4, 0);
+        mesh.velocity = new THREE.Vector3((Math.random()-0.5)*0.1, 0.17, 0);
         
         scene.add(mesh); targets.push(mesh);
-        setTimeout(spawnLoop, Math.max(300, 700 - (60 - timeLeft) * 8));
+        setTimeout(spawnLoop, Math.max(350, 750 - (60 - timeLeft) * 8));
     }
 
     const cameraControl = new Camera(document.getElementById('input_video'), {
@@ -190,21 +191,30 @@
             t.velocity.y -= 0.0035;
             t.rotation.y += 0.05;
             
-            // SCREEN EDGE COLLISION (Bounce)
-            if (Math.abs(t.position.x) > 3.5) {
-                t.velocity.x *= -1;
-                t.position.x = Math.sign(t.position.x) * 3.4;
+            // SCREEN EDGE BOUNCE (Keeps them on screen)
+            if (Math.abs(t.position.x) > 3.2) {
+                t.velocity.x *= -1.1; // Ricochet inward with speed
+                t.position.x = Math.sign(t.position.x) * 3.1;
+            }
+            
+            // CEILING BOUNCE (Prevents going off top)
+            if (t.position.y > 4.5) {
+                t.velocity.y *= -0.5;
+                t.position.y = 4.4;
             }
 
             if (t.position.y < -5) {
-                if (!t.userData.isBomb && !t.userData.isRadiant && !t.userData.isHeal && !isRadiant) { score = Math.max(0, score-5); triggerEffect('tint-orange', 600, 0.2); }
+                if (!t.userData.isBomb && !t.userData.isRadiant && !t.userData.isHeal && !isRadiant) { 
+                    score = Math.max(0, score-5); 
+                    triggerEffect('tint-orange', 600, 0.15); 
+                }
                 scene.remove(t); targets.splice(i, 1);
                 document.getElementById('score').innerText = score;
             }
         });
         particles.forEach((p, i) => {
             p.position.add(p.userData.velocity);
-            p.userData.life -= 0.03;
+            p.userData.life -= 0.04;
             p.scale.setScalar(p.userData.life);
             if(p.userData.life <= 0) { scene.remove(p); particles.splice(i, 1); }
         });

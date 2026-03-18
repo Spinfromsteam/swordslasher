@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hand Tracking Sword Slash</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        background: #000;
+        font-family: sans-serif;
+      }
+      #ui {
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        color: white;
+        z-index: 10;
+        pointer-events: none;
+      }
+      #timer {
+        font-size: 2rem;
+      }
+      #score {
+        font-size: 1.5rem;
+        color: #00ffcc;
+      }
+      #webcam-container {
+        position: absolute;
+        bottom: 20px;
+        right: 20px;
+        width: 200px;
+        border: 2px solid #555;
+        transform: scaleX(-1);
+      }
+      canvas {
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="ui">
+      <div id="timer">Time: 60</div>
+      <div id="score">Score: 0</div>
+    </div>
+    <video id="input_video" style="display: none"></video>
+    <canvas id="webcam-container"></canvas>
+
+    <script>
+      let score = 0;
+      let timeLeft = 60;
+      let gameActive = true;
+      const targets = [];
+
+      // --- THREE.JS SETUP ---
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(
+        75,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        1000
+      );
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.body.appendChild(renderer.domElement);
+
+      const light = new THREE.PointLight(0xffffff, 1, 100);
+      light.position.set(10, 10, 10);
+      scene.add(light);
+      scene.add(new THREE.AmbientLight(0x404040));
+
+      // Sword Geometry (A long thin box)
+      const swordGroup = new THREE.Group();
+      const bladeGeo = new THREE.BoxGeometry(0.1, 2, 0.1);
+      const bladeMat = new THREE.MeshStandardMaterial({
+        color: 0x00ffff,
+        emissive: 0x00ffff,
+      });
+      const blade = new THREE.Mesh(bladeGeo, bladeMat);
+      blade.position.y = 1; // Pivot from the handle
+      swordGroup.add(blade);
+      scene.add(swordGroup);
+
+      camera.position.z = 5;
+
+      // --- GAME LOGIC ---
+      function spawnShape() {
+        if (!gameActive) return;
+        const geometries = [
+          new THREE.BoxGeometry(0.5, 0.5, 0.5),
+          new THREE.SphereGeometry(0.3, 16, 16),
+          new THREE.OctahedronGeometry(0.4),
+        ];
+        const geom = geometries[Math.floor(Math.random() * geometries.length)];
+        const mat = new THREE.MeshStandardMaterial({
+          color: Math.random() * 0xffffff,
+        });
+        const mesh = new THREE.Mesh(geom, mat);
+
+        mesh.position.set(
+          (Math.random() - 0.5) * 6,
+          -3,
+          (Math.random() - 0.5) * 2
+        );
+        mesh.velocity = new THREE.Vector3(
+          (Math.random() - 0.5) * 0.05,
+          0.1 + Math.random() * 0.05,
+          0
+        );
+
+        scene.add(mesh);
+        targets.push(mesh);
+        setTimeout(spawnShape, 1000);
+      }
+
+      const timerInterval = setInterval(() => {
+        if (timeLeft > 0) {
+          timeLeft--;
+          document.getElementById('timer').innerText = `Time: ${timeLeft}`;
+        } else {
+          gameActive = false;
+          alert(`Game Over! Final Score: ${score}`);
+          clearInterval(timerInterval);
+        }
+      }, 1000);
+
+      // --- MEDIAPIPE HAND TRACKING ---
+      const videoElement = document.getElementById('input_video');
+      const hands = new Hands({
+        locateFile: (file) =>
+          `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
+      });
+
+      hands.setOptions({
+        maxNumHands: 1,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5,
+      });
+
+      hands.onResults((results) => {
+        if (
+          results.multiHandLandmarks &&
+          results.multiHandLandmarks.length > 0
+        ) {
+          const hand = results.multiHandLandmarks[0];
+          // Index finger tip and wrist to determine sword angle
+          const tip = hand[8];
+          const wrist = hand[0];
+
+          // Map hand coordinates to 3D space
+          const x = (tip.x - 0.5) * -10;
+          const y = (tip.y - 0.5) * -6;
+
+          swordGroup.position.set(x, y, 0);
+          swordGroup.rotation.z = Math.atan2(tip.x - wrist.x, tip.y - wrist.y);
+
+          // Simple Collision Check
+          checkCollisions();
+        }
+      });
+
+      function checkCollisions() {
+        const swordTip = new THREE.Vector3();
+        blade.getWorldPosition(swordTip);
+
+        for (let i = targets.length - 1; i >= 0; i--) {
+          if (swordTip.distanceTo(targets[i].position) < 0.8) {
+            scene.remove(targets[i]);
+            targets.splice(i, 1);
+            score += 10;
+            document.getElementById('score').innerText = `Score: ${score}`;
+          }
+        }
+      }
+
+      const cameraUtils = new Camera(videoElement, {
+        onFrame: async () => {
+          await hands.send({ image: videoElement });
+        },
+        width: 640,
+        height: 480,
+      });
+      cameraUtils.start();
+
+      // --- ANIMATION LOOP ---
+      function animate() {
+        requestAnimationFrame(animate);
+
+        targets.forEach((obj, index) => {
+          obj.position.add(obj.velocity);
+          obj.rotation.x += 0.02;
+          if (obj.position.y > 5) {
+            scene.remove(obj);
+            targets.splice(index, 1);
+          }
+        });
+
+        renderer.render(scene, camera);
+      }
+
+      spawnShape();
+      animate();
+
+      window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+    </script>
+  </body>
+</html>

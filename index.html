@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Sword Master: Radiant</title>
+    <title>Sword Master: Recovery</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -12,12 +12,13 @@
         #ui { position: absolute; top: 15px; left: 15px; color: white; z-index: 100; font-family: -apple-system, sans-serif; pointer-events: none; width: calc(100% - 30px); display: flex; justify-content: space-between; }
         #timer { font-size: 1.8rem; font-weight: 800; }
         #score { font-size: 1.2rem; color: #00ffcc; }
-        #lives { font-size: 1.5rem; color: #ff4444; }
-        #powerup-ui { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); color: #FFD700; font-weight: bold; font-size: 1.2rem; display: none; z-index: 100; }
+        #lives { font-size: 1.5rem; color: #ff4444; letter-spacing: 2px; }
+        #powerup-ui { position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%); color: #FFD700; font-weight: bold; font-size: 1.2rem; display: none; z-index: 100; text-shadow: 0 0 10px #000; }
         
         .overlay-fx { position: fixed; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; z-index: 50; pointer-events: none; }
         #flash-white { background: white; }
         #flash-red { background: red; }
+        #flash-green { background: #00ff00; }
         #tint-orange { background: orange; transition: opacity 0.5s; }
 
         #start-overlay {
@@ -25,19 +26,21 @@
             background: rgba(0,0,0,0.9); display: flex; flex-direction: column;
             justify-content: center; align-items: center; z-index: 1000; color: white; text-align: center; padding: 20px;
         }
-        button { padding: 15px 40px; font-size: 1.2rem; border-radius: 30px; border: none; background: #FFD700; color: black; font-weight: bold; margin-top: 20px; }
+        button { padding: 15px 40px; font-size: 1.2rem; border-radius: 30px; border: none; background: #00ffcc; color: black; font-weight: bold; margin-top: 20px; }
     </style>
 </head>
 <body>
 
 <div id="flash-white" class="overlay-fx"></div>
 <div id="flash-red" class="overlay-fx"></div>
+<div id="flash-green" class="overlay-fx"></div>
 <div id="tint-orange" class="overlay-fx"></div>
 <div id="powerup-ui">RADIANT IMMUNITY!</div>
 
 <div id="start-overlay">
     <h1>Sword Master</h1>
-    <p>Slice <span style="color:#FFD700">GOLDEN STARS</span> for 5s Immunity!</p>
+    <p>Slice <span style="color:#00ff00">GREEN CUBES</span> to heal!<br>
+    Slice <span style="color:#FFD700">GOLD STARS</span> for Immunity!</p>
     <button id="start-btn">START</button>
 </div>
 
@@ -82,7 +85,7 @@
 
     camera.position.z = 5;
 
-    function triggerEffect(id, duration = 100, maxOpacity = 0.6) {
+    function triggerEffect(id, duration = 100, maxOpacity = 0.3) {
         const el = document.getElementById(id);
         el.style.opacity = maxOpacity;
         setTimeout(() => { el.style.opacity = '0'; }, duration);
@@ -93,7 +96,6 @@
         bladeMat.emissive.setHex(0xFFD700);
         trailMat.color.setHex(0xFFD700);
         document.getElementById('powerup-ui').style.display = 'block';
-        
         setTimeout(() => {
             isRadiant = false;
             bladeMat.emissive.setHex(0x00ffff);
@@ -134,18 +136,22 @@
         for (let i = targets.length - 1; i >= 0; i--) {
             const t = targets[i];
             if (tipPos.distanceTo(t.position) < 0.7) {
-                if (t.userData.isPowerup) {
+                if (t.userData.isRadiant) {
                     activateRadiant();
-                    triggerEffect('flash-white', 200, 0.8);
+                    triggerEffect('flash-white', 200, 0.5);
+                } else if (t.userData.isHeal) {
+                    if (lives < 3) lives++;
+                    triggerEffect('flash-green', 200, 0.4);
+                    document.getElementById('lives').innerText = "❤".repeat(lives);
                 } else if (t.userData.isBomb) {
                     if (!isRadiant) {
                         lives--;
-                        triggerEffect('flash-red', 150, 0.7);
+                        triggerEffect('flash-red', 150, 0.6);
                         document.getElementById('lives').innerText = "❤".repeat(lives);
                         if (lives <= 0) endGame("OUT OF LIVES");
                     }
                 } else {
-                    triggerEffect('flash-white', 80, 0.5);
+                    triggerEffect('flash-white', 80, 0.3);
                     score += 10;
                 }
                 scene.remove(t); targets.splice(i, 1);
@@ -172,14 +178,20 @@
     function spawnLoop() {
         if (!gameActive) return;
         const rand = Math.random();
-        const isPowerup = rand < 0.05; // 5% chance
-        const isBomb = !isPowerup && rand < (0.05 + bombChance);
+        
+        // Rarity Logic
+        const isRadiantSpawn = rand < 0.03; // 3% chance (Spawned less)
+        const isHealSpawn = !isRadiantSpawn && rand < 0.09; // ~6% chance (Medium rarity)
+        const isBombSpawn = !isRadiantSpawn && !isHealSpawn && rand < (0.09 + bombChance);
         
         let geom, mat;
-        if (isPowerup) {
+        if (isRadiantSpawn) {
             geom = new THREE.SphereGeometry(0.3, 16, 16);
             mat = new THREE.MeshStandardMaterial({ color: 0xFFD700, emissive: 0xFFD700, emissiveIntensity: 2 });
-        } else if (isBomb) {
+        } else if (isHealSpawn) {
+            geom = new THREE.BoxGeometry(0.4, 0.4, 0.4); // Healing Cube
+            mat = new THREE.MeshStandardMaterial({ color: 0x00ff00, emissive: 0x00ff00, emissiveIntensity: 1 });
+        } else if (isBombSpawn) {
             geom = new THREE.ConeGeometry(0.4, 0.7, 4);
             mat = new THREE.MeshPhongMaterial({ color: 0xff0000 });
         } else {
@@ -188,14 +200,13 @@
         }
 
         const mesh = new THREE.Mesh(geom, mat);
-        mesh.userData = { isBomb, isPowerup };
+        mesh.userData = { isBomb: isBombSpawn, isRadiant: isRadiantSpawn, isHeal: isHealSpawn };
         mesh.position.set((Math.random() - 0.5) * 5, -4, 0);
-        mesh.velocity = new THREE.Vector3((Math.random() - 0.5) * 0.03, 0.14, 0);
+        mesh.velocity = new THREE.Vector3((Math.random() - 0.5) * 0.03, 0.15, 0);
         scene.add(mesh);
         targets.push(mesh);
         
-        // Slightly faster base spawning
-        const interval = Math.max(500, 800 - (60 - timeLeft) * 6);
+        const interval = Math.max(450, 750 - (60 - timeLeft) * 6);
         setTimeout(spawnLoop, interval);
     }
 
@@ -204,7 +215,7 @@
             if (!gameActive) { clearInterval(ticker); return; }
             timeLeft--;
             document.getElementById('timer').innerText = timeLeft;
-            bombChance = Math.min(0.5, 0.1 + (60 - timeLeft) * 0.008);
+            bombChance = Math.min(0.5, 0.1 + (60 - timeLeft) * 0.01);
             if (timeLeft <= 0) { endGame("TIME UP"); clearInterval(ticker); }
         }, 1000);
     }
@@ -214,13 +225,14 @@
         for (let i = targets.length - 1; i >= 0; i--) {
             const t = targets[i];
             t.position.add(t.velocity);
-            t.velocity.y -= 0.0028;
+            t.velocity.y -= 0.003;
             t.rotation.y += 0.06;
             if (t.position.y < -5) {
-                if (!t.userData.isBomb && !t.userData.isPowerup && !isRadiant) {
+                // If you miss a target OR a heal cube while not radiant, you lose points
+                if (!t.userData.isBomb && !isRadiant) {
                     score = Math.max(0, score - 5);
                     document.getElementById('score').innerText = score;
-                    triggerEffect('tint-orange', 800, 0.3); // More transparent orange tint
+                    triggerEffect('tint-orange', 600, 0.2);
                 }
                 scene.remove(t); targets.splice(i, 1);
             }

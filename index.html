@@ -1,216 +1,181 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Hand Tracking Sword Slash</title>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>SE Sword Master</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
-      body {
-        margin: 0;
-        overflow: hidden;
-        background: #000;
-        font-family: sans-serif;
-      }
-      #ui {
-        position: absolute;
-        top: 20px;
-        left: 20px;
-        color: white;
-        z-index: 10;
-        pointer-events: none;
-      }
-      #timer {
-        font-size: 2rem;
-      }
-      #score {
-        font-size: 1.5rem;
-        color: #00ffcc;
-      }
-      #webcam-container {
-        position: absolute;
-        bottom: 20px;
-        right: 20px;
-        width: 200px;
-        border: 2px solid #555;
-        transform: scaleX(-1);
-      }
-      canvas {
-        display: block;
-      }
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; touch-action: none; }
+        #ui { position: absolute; top: 10px; left: 10px; color: white; z-index: 100; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto; }
+        #timer { font-size: 1.5rem; font-weight: bold; }
+        #score { font-size: 1.2rem; color: #00ffcc; }
+        
+        /* Mobile Start Button (Required for iOS) */
+        #start-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8); display: flex; flex-direction: column;
+            justify-content: center; align-items: center; z-index: 1000; color: white;
+        }
+        button { padding: 15px 40px; font-size: 1.2rem; border-radius: 30px; border: none; background: #00ffcc; cursor: pointer; }
+        
+        #webcam-preview {
+            position: absolute; bottom: 10px; right: 10px; width: 120px; 
+            height: auto; border: 1px solid #444; border-radius: 8px; transform: scaleX(-1);
+        }
     </style>
-  </head>
-  <body>
-    <div id="ui">
-      <div id="timer">Time: 60</div>
-      <div id="score">Score: 0</div>
-    </div>
-    <video id="input_video" style="display: none"></video>
-    <canvas id="webcam-container"></canvas>
+</head>
+<body>
 
-    <script>
-      let score = 0;
-      let timeLeft = 60;
-      let gameActive = true;
-      const targets = [];
+<div id="start-overlay">
+    <h2>SE Sword Master</h2>
+    <p>Hold your hand up to the camera</p>
+    <button id="start-btn">START GAME</button>
+</div>
 
-      // --- THREE.JS SETUP ---
-      const scene = new THREE.Scene();
-      const camera = new THREE.PerspectiveCamera(
-        75,
-        window.innerWidth / window.innerHeight,
-        0.1,
-        1000
-      );
-      const renderer = new THREE.WebGLRenderer({ antialias: true });
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      document.body.appendChild(renderer.domElement);
+<div id="ui">
+    <div id="timer">1:00</div>
+    <div id="score">Score: 0</div>
+</div>
 
-      const light = new THREE.PointLight(0xffffff, 1, 100);
-      light.position.set(10, 10, 10);
-      scene.add(light);
-      scene.add(new THREE.AmbientLight(0x404040));
+<video id="input_video" playsinline style="display:none;"></video>
 
-      // Sword Geometry (A long thin box)
-      const swordGroup = new THREE.Group();
-      const bladeGeo = new THREE.BoxGeometry(0.1, 2, 0.1);
-      const bladeMat = new THREE.MeshStandardMaterial({
-        color: 0x00ffff,
-        emissive: 0x00ffff,
-      });
-      const blade = new THREE.Mesh(bladeGeo, bladeMat);
-      blade.position.y = 1; // Pivot from the handle
-      swordGroup.add(blade);
-      scene.add(swordGroup);
+<script>
+    let score = 0;
+    let timeLeft = 60;
+    let gameActive = false;
+    const targets = [];
 
-      camera.position.z = 5;
+    // --- THREE.JS ---
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: false }); // Disable antialias for speed on SE
+    
+    // Performance Tweak: iPhone SE has a very high pixel density. 
+    // Setting this to 1 or 1.5 saves the GPU from overheating.
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
 
-      // --- GAME LOGIC ---
-      function spawnShape() {
+    // Sword Setup
+    const swordGroup = new THREE.Group();
+    const blade = new THREE.Mesh(
+        new THREE.BoxGeometry(0.1, 2.5, 0.1),
+        new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00ffff })
+    );
+    blade.position.y = 1.25; 
+    swordGroup.add(blade);
+    scene.add(swordGroup);
+
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x000000, 1));
+    camera.position.z = 5;
+
+    // --- GAME ENGINE ---
+    function spawnTarget() {
         if (!gameActive) return;
-        const geometries = [
-          new THREE.BoxGeometry(0.5, 0.5, 0.5),
-          new THREE.SphereGeometry(0.3, 16, 16),
-          new THREE.OctahedronGeometry(0.4),
-        ];
-        const geom = geometries[Math.floor(Math.random() * geometries.length)];
-        const mat = new THREE.MeshStandardMaterial({
-          color: Math.random() * 0xffffff,
-        });
+        const geom = new THREE.IcosahedronGeometry(0.4, 0);
+        const mat = new THREE.MeshPhongMaterial({ color: 0xff0066 });
         const mesh = new THREE.Mesh(geom, mat);
-
-        mesh.position.set(
-          (Math.random() - 0.5) * 6,
-          -3,
-          (Math.random() - 0.5) * 2
-        );
-        mesh.velocity = new THREE.Vector3(
-          (Math.random() - 0.5) * 0.05,
-          0.1 + Math.random() * 0.05,
-          0
-        );
-
+        
+        mesh.position.set((Math.random() - 0.5) * 5, -4, 0);
+        mesh.velocity = new THREE.Vector3((Math.random() - 0.5) * 0.04, 0.12, 0);
+        
         scene.add(mesh);
         targets.push(mesh);
-        setTimeout(spawnShape, 1000);
-      }
+        setTimeout(spawnTarget, 1200);
+    }
 
-      const timerInterval = setInterval(() => {
-        if (timeLeft > 0) {
-          timeLeft--;
-          document.getElementById('timer').innerText = `Time: ${timeLeft}`;
-        } else {
-          gameActive = false;
-          alert(`Game Over! Final Score: ${score}`);
-          clearInterval(timerInterval);
-        }
-      }, 1000);
+    // --- HAND TRACKING ---
+    const videoElement = document.getElementById('input_video');
+    const hands = new Hands({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+    });
 
-      // --- MEDIAPIPE HAND TRACKING ---
-      const videoElement = document.getElementById('input_video');
-      const hands = new Hands({
-        locateFile: (file) =>
-          `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
-      });
-
-      hands.setOptions({
+    hands.setOptions({
         maxNumHands: 1,
-        modelComplexity: 1,
+        modelComplexity: 0, // 0 is faster for mobile
         minDetectionConfidence: 0.5,
-        minTrackingConfidence: 0.5,
-      });
+        minTrackingConfidence: 0.5
+    });
 
-      hands.onResults((results) => {
-        if (
-          results.multiHandLandmarks &&
-          results.multiHandLandmarks.length > 0
-        ) {
-          const hand = results.multiHandLandmarks[0];
-          // Index finger tip and wrist to determine sword angle
-          const tip = hand[8];
-          const wrist = hand[0];
+    hands.onResults((results) => {
+        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+            const hand = results.multiHandLandmarks[0];
+            const tip = hand[8]; // Index tip
+            const wrist = hand[0];
 
-          // Map hand coordinates to 3D space
-          const x = (tip.x - 0.5) * -10;
-          const y = (tip.y - 0.5) * -6;
+            // Normalize coordinates for the 3D scene
+            const x = (tip.x - 0.5) * -8;
+            const y = (tip.y - 0.5) * -6;
+            
+            swordGroup.position.lerp(new THREE.Vector3(x, y, 0), 0.3); // Smooth movement
+            swordGroup.rotation.z = Math.atan2(tip.x - wrist.x, tip.y - wrist.y);
 
-          swordGroup.position.set(x, y, 0);
-          swordGroup.rotation.z = Math.atan2(tip.x - wrist.x, tip.y - wrist.y);
-
-          // Simple Collision Check
-          checkCollisions();
+            // Hit detection
+            const tipWorld = new THREE.Vector3();
+            blade.getWorldPosition(tipWorld);
+            
+            for (let i = targets.length - 1; i >= 0; i--) {
+                if (tipWorld.distanceTo(targets[i].position) < 0.7) {
+                    scene.remove(targets[i]);
+                    targets.splice(i, 1);
+                    score += 10;
+                    document.getElementById('score').innerText = `Score: ${score}`;
+                }
+            }
         }
-      });
+    });
 
-      function checkCollisions() {
-        const swordTip = new THREE.Vector3();
-        blade.getWorldPosition(swordTip);
+    const cameraControl = new Camera(videoElement, {
+        onFrame: async () => { if(gameActive) await hands.send({image: videoElement}); },
+        width: 480, height: 360 // Lower resolution for faster processing
+    });
 
-        for (let i = targets.length - 1; i >= 0; i--) {
-          if (swordTip.distanceTo(targets[i].position) < 0.8) {
-            scene.remove(targets[i]);
-            targets.splice(i, 1);
-            score += 10;
-            document.getElementById('score').innerText = `Score: ${score}`;
-          }
-        }
-      }
+    // --- START LOGIC ---
+    document.getElementById('start-btn').addEventListener('click', () => {
+        document.getElementById('start-overlay').style.display = 'none';
+        gameActive = true;
+        cameraControl.start();
+        spawnTarget();
+        startTimer();
+    });
 
-      const cameraUtils = new Camera(videoElement, {
-        onFrame: async () => {
-          await hands.send({ image: videoElement });
-        },
-        width: 640,
-        height: 480,
-      });
-      cameraUtils.start();
+    function startTimer() {
+        const timerObj = setInterval(() => {
+            if (timeLeft > 0) {
+                timeLeft--;
+                document.getElementById('timer').innerText = timeLeft;
+            } else {
+                gameActive = false;
+                alert("Game Over! Score: " + score);
+                clearInterval(timerObj);
+                location.reload();
+            }
+        }, 1000);
+    }
 
-      // --- ANIMATION LOOP ---
-      function animate() {
+    function animate() {
         requestAnimationFrame(animate);
-
-        targets.forEach((obj, index) => {
-          obj.position.add(obj.velocity);
-          obj.rotation.x += 0.02;
-          if (obj.position.y > 5) {
-            scene.remove(obj);
-            targets.splice(index, 1);
-          }
+        targets.forEach((t, i) => {
+            t.position.add(t.velocity);
+            t.velocity.y -= 0.002; // Gravity
+            t.rotation.x += 0.05;
+            if (t.position.y < -5) {
+                scene.remove(t);
+                targets.splice(i, 1);
+            }
         });
-
         renderer.render(scene, camera);
-      }
+    }
+    animate();
 
-      spawnShape();
-      animate();
-
-      window.addEventListener('resize', () => {
+    window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
-      });
-    </script>
-  </body>
+    });
+</script>
+</body>
 </html>

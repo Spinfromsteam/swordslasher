@@ -31,7 +31,7 @@
 
 <div id="start-overlay">
     <h1>Slash em</h1>
-    <p>Agile Shortsword Mode<br>Objects Bounce Off Walls!</p>
+    <p>Enhanced Glow & Thicker Trails<br>Rare Spawns Increased!</p>
     <button id="start-btn">START</button>
 </div>
 
@@ -44,44 +44,53 @@
 
 <script>
     let score = 0, timeLeft = 60, lives = 3, gameActive = false;
-    let isRadiant = false, bombChance = 0.1, healChance = 0.005, radiantChance = 0.002;
+    let isRadiant = false, bombChance = 0.1;
+    
+    // UPDATED SPAWN RATES (Increased slightly)
+    let healChance = 0.012;     // Increased from 0.005
+    let radiantChance = 0.006;  // Increased from 0.002
+
     const targets = [], particles = [], trailPoints = [];
-    const MAX_TRAIL_POINTS = 8;
+    const MAX_TRAIL_POINTS = 10;
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-    const renderer = new THREE.WebGLRenderer({ antialias: false });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.2));
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.2));
+    
+    // Brighter Scene Lighting
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x000000, 1.5));
 
-    // --- SMALLER LIGHT GRAY SWORD ---
+    // --- BRIGHTER SWORD ---
     const swordGroup = new THREE.Group();
     const bladeMat = new THREE.MeshStandardMaterial({ 
-        color: 0xd3d3d3, // Light Gray
-        metalness: 0.5, 
-        roughness: 0.3,
+        color: 0xffffff, 
+        metalness: 0.1, 
+        roughness: 0.1,
         emissive: 0xffffff,
-        emissiveIntensity: 0.2 
+        emissiveIntensity: 1.5 // Significant brightness boost
     });
     
-    // Blade: Reduced height from 1.8 to 1.1
-    const bladeGeo = new THREE.BoxGeometry(0.1, 1.1, 0.03);
+    const bladeGeo = new THREE.BoxGeometry(0.12, 1.1, 0.05);
     bladeGeo.translate(0, 0.55, 0); 
     const blade = new THREE.Mesh(bladeGeo, bladeMat);
     
-    // Small Guard
-    const guard = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.06, 0.1), new THREE.MeshStandardMaterial({color: 0xaaaaaa}));
-    
-    // Small Handle
-    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.25), new THREE.MeshStandardMaterial({color: 0x222222}));
+    const guard = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.08, 0.12), new THREE.MeshStandardMaterial({color: 0xcccccc, emissive: 0xffffff, emissiveIntensity: 0.4}));
+    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.25), new THREE.MeshStandardMaterial({color: 0x111111}));
     handle.position.y = -0.12;
 
     swordGroup.add(blade, guard, handle);
     scene.add(swordGroup);
 
-    const trailMat = new THREE.MeshBasicMaterial({ color: 0xeeeeee, transparent: true, opacity: 0.3, side: THREE.DoubleSide });
+    // --- THICKER & BRIGHTER TRAIL ---
+    const trailMat = new THREE.MeshBasicMaterial({ 
+        color: 0xffffff, 
+        transparent: true, 
+        opacity: 0.6, 
+        side: THREE.DoubleSide 
+    });
     const trailMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1, 1, MAX_TRAIL_POINTS - 1), trailMat);
     scene.add(trailMesh);
     camera.position.z = 5;
@@ -93,10 +102,10 @@
     }
 
     function createSplat(pos, color) {
-        for(let i=0; i<5; i++) {
-            const p = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.08), new THREE.MeshBasicMaterial({ color: color }));
+        for(let i=0; i<6; i++) {
+            const p = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), new THREE.MeshBasicMaterial({ color: color }));
             p.position.copy(pos);
-            p.userData = { velocity: new THREE.Vector3((Math.random()-0.5)*0.12, (Math.random()-0.5)*0.12, (Math.random()-0.5)*0.12), life: 1.0 };
+            p.userData = { velocity: new THREE.Vector3((Math.random()-0.5)*0.15, (Math.random()-0.5)*0.15, (Math.random()-0.5)*0.15), life: 1.0 };
             particles.push(p); scene.add(p);
         }
     }
@@ -128,15 +137,22 @@
         updateTrail();
 
         for (let i = targets.length - 1; i >= 0; i--) {
-            if (checkBladeCollision(targets[i].position, 0.55)) {
+            if (checkBladeCollision(targets[i].position, 0.6)) {
                 const t = targets[i];
                 createSplat(t.position, t.material.color.getHex());
                 if (t.userData.isRadiant) { 
                     isRadiant = true; 
-                    bladeMat.emissive.setHex(0xFFD700); 
-                    setTimeout(() => { isRadiant = false; bladeMat.emissive.setHex(0xffffff); }, 5000);
+                    bladeMat.color.setHex(0xFFFF00);
+                    bladeMat.emissive.setHex(0xFFFF00); 
+                    trailMat.color.setHex(0xFFFF00);
+                    setTimeout(() => { 
+                        isRadiant = false; 
+                        bladeMat.color.setHex(0xffffff);
+                        bladeMat.emissive.setHex(0xffffff); 
+                        trailMat.color.setHex(0xffffff);
+                    }, 6000);
                 } 
-                else if (t.userData.isHeal) { if(lives < 3) lives++; triggerEffect('flash-green', 200, 0.4); }
+                else if (t.userData.isHeal) { if(lives < 3) lives++; triggerEffect('flash-green', 250, 0.4); }
                 else if (t.userData.isBomb) { if(!isRadiant) { lives--; triggerEffect('flash-red', 150, 0.6); if(lives<=0) location.reload(); } }
                 else { score += 10; triggerEffect('flash-white', 80, 0.2); }
                 
@@ -151,8 +167,10 @@
         if (trailPoints.length < 2) return;
         const positions = trailMesh.geometry.attributes.position.array;
         for (let i = 0; i < trailPoints.length; i++) {
-            positions[i*6] = trailPoints[i].x-0.03; positions[i*6+1] = trailPoints[i].y;
-            positions[i*6+3] = trailPoints[i].x+0.03; positions[i*6+4] = trailPoints[i].y;
+            // Wider trail offsets
+            const offset = 0.12; 
+            positions[i*6] = trailPoints[i].x - offset; positions[i*6+1] = trailPoints[i].y;
+            positions[i*6+3] = trailPoints[i].x + offset; positions[i*6+4] = trailPoints[i].y;
         }
         trailMesh.geometry.attributes.position.needsUpdate = true;
     }
@@ -161,16 +179,19 @@
         if (!gameActive) return;
         const rand = Math.random();
         const isR = rand < radiantChance, isH = !isR && rand < (radiantChance + healChance), isB = !isR && !isH && rand < (radiantChance + healChance + bombChance);
-        const mat = new THREE.MeshPhongMaterial({ color: isR ? 0xFFD700 : isH ? 0x00ff00 : isB ? 0xff0000 : 0x00ffff });
+        const mat = new THREE.MeshPhongMaterial({ 
+            color: isR ? 0xFFD700 : isH ? 0x00ff00 : isB ? 0xff0000 : 0x00ffff,
+            emissive: isR ? 0xFFD700 : isH ? 0x00ff00 : 0x000000,
+            emissiveIntensity: 0.5
+        });
         const mesh = new THREE.Mesh(isB ? new THREE.ConeGeometry(0.35, 0.6, 4) : isH ? new THREE.BoxGeometry(0.35,0.35,0.35) : new THREE.IcosahedronGeometry(0.3, 1), mat);
         
         mesh.userData = { isBomb: isB, isRadiant: isR, isHeal: isH };
-        // Spawn strictly within visible center
         mesh.position.set((Math.random()-0.5)*5, -4, 0);
-        mesh.velocity = new THREE.Vector3((Math.random()-0.5)*0.1, 0.17, 0);
+        mesh.velocity = new THREE.Vector3((Math.random()-0.5)*0.12, 0.18, 0);
         
         scene.add(mesh); targets.push(mesh);
-        setTimeout(spawnLoop, Math.max(350, 750 - (60 - timeLeft) * 8));
+        setTimeout(spawnLoop, Math.max(300, 750 - (60 - timeLeft) * 8));
     }
 
     const cameraControl = new Camera(document.getElementById('input_video'), {
@@ -181,7 +202,13 @@
     document.getElementById('start-btn').addEventListener('click', () => {
         document.getElementById('start-overlay').style.display = 'none';
         gameActive = true; cameraControl.start(); spawnLoop();
-        setInterval(() => { if(gameActive) { timeLeft--; document.getElementById('timer').innerText = timeLeft; if(timeLeft<=0) location.reload(); } }, 1000);
+        setInterval(() => { if(gameActive) { timeLeft--; document.getElementById('timer').innerText = timeLeft; 
+            const elapsed = 60 - timeLeft;
+            bombChance = Math.min(0.45, 0.1 + elapsed * 0.009);
+            healChance = Math.min(0.06, 0.012 + elapsed * 0.001); // Scales up to 6%
+            radiantChance = Math.min(0.02, 0.006 + elapsed * 0.0004); // Scales up to 2%
+            if(timeLeft<=0) location.reload(); 
+        } }, 1000);
     });
 
     function animate() {
@@ -190,23 +217,11 @@
             t.position.add(t.velocity);
             t.velocity.y -= 0.0035;
             t.rotation.y += 0.05;
-            
-            // SCREEN EDGE BOUNCE (Keeps them on screen)
-            if (Math.abs(t.position.x) > 3.2) {
-                t.velocity.x *= -1.1; // Ricochet inward with speed
-                t.position.x = Math.sign(t.position.x) * 3.1;
-            }
-            
-            // CEILING BOUNCE (Prevents going off top)
-            if (t.position.y > 4.5) {
-                t.velocity.y *= -0.5;
-                t.position.y = 4.4;
-            }
-
+            if (Math.abs(t.position.x) > 3.2) { t.velocity.x *= -1.1; t.position.x = Math.sign(t.position.x) * 3.1; }
+            if (t.position.y > 4.5) { t.velocity.y *= -0.5; t.position.y = 4.4; }
             if (t.position.y < -5) {
                 if (!t.userData.isBomb && !t.userData.isRadiant && !t.userData.isHeal && !isRadiant) { 
-                    score = Math.max(0, score-5); 
-                    triggerEffect('tint-orange', 600, 0.15); 
+                    score = Math.max(0, score-5); triggerEffect('tint-orange', 600, 0.15); 
                 }
                 scene.remove(t); targets.splice(i, 1);
                 document.getElementById('score').innerText = score;

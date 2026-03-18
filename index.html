@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Sword Master: Precision</title>
+    <title>Sword Master: Escalation</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -14,9 +14,11 @@
         #score { font-size: 1.2rem; color: #00ffcc; }
         #lives { font-size: 1.5rem; color: #ff4444; }
         
-        #flash, #death-flash { position: fixed; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; z-index: 50; pointer-events: none; }
-        #flash { background: white; }
-        #death-flash { background: red; }
+        /* Full-screen Overlays */
+        .overlay-fx { position: fixed; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; z-index: 50; pointer-events: none; transition: opacity 0.1s; }
+        #flash-white { background: white; }
+        #flash-red { background: red; }
+        #tint-orange { background: orange; transition: opacity 0.5s; } /* Slower fade for the 1s tint */
 
         #start-overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
@@ -24,20 +26,18 @@
             justify-content: center; align-items: center; z-index: 1000; color: white; text-align: center; padding: 20px;
         }
         button { padding: 15px 40px; font-size: 1.2rem; border-radius: 30px; border: none; background: #00ffff; color: black; font-weight: bold; margin-top: 20px; }
-        .penalty { color: #ff9900; font-size: 0.9rem; }
     </style>
 </head>
 <body>
 
-<div id="flash"></div>
-<div id="death-flash"></div>
+<div id="flash-white" class="overlay-fx"></div>
+<div id="flash-red" class="overlay-fx"></div>
+<div id="tint-orange" class="overlay-fx"></div>
 
 <div id="start-overlay">
     <h1>Sword Master</h1>
-    <p>Slice <span style="color:#00ffff">CYAN</span> shapes.<br>
-    Avoid <span style="color:#ff4444">RED PYRAMIDS</span>.<br>
-    <span class="penalty">Don't let Cyan shapes fall (-5 pts)!</span></p>
-    <button id="start-btn">START GAME</button>
+    <p>The longer you survive, the more <span style="color:#ff4444">BOMBS</span> appear!</p>
+    <button id="start-btn">START QUEST</button>
 </div>
 
 <div id="ui">
@@ -52,39 +52,31 @@
 
 <script>
     let score = 0, timeLeft = 60, lives = 3, gameActive = false;
+    let bombChance = 0.1; // Starts at 10%
     const targets = [];
     const trailPoints = [];
     const MAX_TRAIL_POINTS = 10;
 
+    // --- THREE.JS SCENE ---
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
     const renderer = new THREE.WebGLRenderer({ antialias: false });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
-
     scene.add(new THREE.HemisphereLight(0xffffff, 0x000000, 1.2));
 
-    // --- BRIGHTER RADIANT SWORD ---
+    // --- GLOWING SWORD ---
     const swordGroup = new THREE.Group();
-    // Blade with high emissive intensity for "glow" look
-    const bladeGeo = new THREE.BoxGeometry(0.09, 1.3, 0.04);
-    const bladeMat = new THREE.MeshStandardMaterial({ 
-        color: 0xffffff, 
-        emissive: 0x00ffff, 
-        emissiveIntensity: 2 
-    });
-    const blade = new THREE.Mesh(bladeGeo, bladeMat);
+    const blade = new THREE.Mesh(
+        new THREE.BoxGeometry(0.1, 1.3, 0.05),
+        new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0x00ffff, emissiveIntensity: 2.5 })
+    );
     blade.position.y = 0.75; 
     swordGroup.add(blade);
-
-    // Hilt/Guard
-    const guard = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.06, 0.1), new THREE.MeshStandardMaterial({color: 0xFFD700}));
-    guard.position.y = 0.1;
-    swordGroup.add(guard);
+    swordGroup.add(new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.06, 0.1), new THREE.MeshStandardMaterial({color: 0xFFD700})));
     scene.add(swordGroup);
 
-    // Thicker Trail
     const trailGeo = new THREE.PlaneGeometry(1, 1, 1, MAX_TRAIL_POINTS - 1);
     const trailMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.4, side: THREE.DoubleSide });
     const trailMesh = new THREE.Mesh(trailGeo, trailMat);
@@ -93,46 +85,43 @@
 
     camera.position.z = 5;
 
-    function triggerFlash(color = 'white') {
-        const el = color === 'white' ? document.getElementById('flash') : document.getElementById('death-flash');
+    // --- VISUAL FX ---
+    function triggerEffect(id, duration = 100) {
+        const el = document.getElementById(id);
         el.style.opacity = '0.6';
-        setTimeout(() => { el.style.opacity = '0'; }, 100);
+        setTimeout(() => { el.style.opacity = '0'; }, duration);
     }
 
+    // --- TRACKING ---
     const hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
     hands.setOptions({ maxNumHands: 1, modelComplexity: 0, minDetectionConfidence: 0.5 });
     
     hands.onResults((results) => {
-        if (!gameActive) return;
-        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-            const hand = results.multiHandLandmarks[0];
-            const tip = hand[8];
-            const wrist = hand[0];
+        if (!gameActive || !results.multiHandLandmarks?.length) return;
+        const hand = results.multiHandLandmarks[0];
+        const tip = hand[8], wrist = hand[0];
+        const x = (tip.x - 0.5) * -8, y = (tip.y - 0.5) * -6;
+        
+        swordGroup.position.lerp(new THREE.Vector3(x, y, 0), 0.4);
+        swordGroup.rotation.z = Math.atan2(tip.x - wrist.x, tip.y - wrist.y);
 
-            const x = (tip.x - 0.5) * -8;
-            const y = (tip.y - 0.5) * -6;
-            
-            swordGroup.position.lerp(new THREE.Vector3(x, y, 0), 0.4);
-            swordGroup.rotation.z = Math.atan2(tip.x - wrist.x, tip.y - wrist.y);
+        const currentTip = new THREE.Vector3();
+        blade.getWorldPosition(currentTip);
+        trailPoints.unshift(currentTip.clone());
+        if (trailPoints.length > MAX_TRAIL_POINTS) trailPoints.pop();
 
-            const currentTip = new THREE.Vector3();
-            blade.getWorldPosition(currentTip);
-            trailPoints.unshift(currentTip.clone());
-            if (trailPoints.length > MAX_TRAIL_POINTS) trailPoints.pop();
-
-            updateTrail();
-            checkCollisions(currentTip);
-        }
+        updateTrail();
+        checkCollisions(currentTip);
     });
 
     function updateTrail() {
         if (trailPoints.length < 2) return;
         const positions = trailMesh.geometry.attributes.position.array;
         for (let i = 0; i < trailPoints.length; i++) {
-            positions[i * 6] = trailPoints[i].x - 0.08; // Wider trail
+            positions[i * 6] = trailPoints[i].x - 0.1;
             positions[i * 6 + 1] = trailPoints[i].y;
             positions[i * 6 + 2] = trailPoints[i].z;
-            positions[i * 6 + 3] = trailPoints[i].x + 0.08;
+            positions[i * 6 + 3] = trailPoints[i].x + 0.1;
             positions[i * 6 + 4] = trailPoints[i].y;
             positions[i * 6 + 5] = trailPoints[i].z;
         }
@@ -144,29 +133,19 @@
             const t = targets[i];
             if (tipPos.distanceTo(t.position) < 0.7) {
                 if (t.userData.isBomb) {
-                    loseLife(i);
+                    lives--;
+                    triggerEffect('flash-red', 150);
+                    document.getElementById('lives').innerText = "❤".repeat(lives);
+                    scene.remove(t); targets.splice(i, 1);
+                    if (lives <= 0) endGame("OUT OF LIVES");
                 } else {
-                    triggerFlash('white');
-                    updateScore(10);
-                    scene.remove(t);
-                    targets.splice(i, 1);
+                    triggerEffect('flash-white', 80);
+                    score += 10;
+                    document.getElementById('score').innerText = `Score: ${score}`;
+                    scene.remove(t); targets.splice(i, 1);
                 }
             }
         }
-    }
-
-    function updateScore(amount) {
-        score = Math.max(0, score + amount);
-        document.getElementById('score').innerText = `Score: ${score}`;
-    }
-
-    function loseLife(index) {
-        lives--;
-        triggerFlash('red');
-        scene.remove(targets[index]);
-        targets.splice(index, 1);
-        document.getElementById('lives').innerText = "❤".repeat(lives);
-        if (lives <= 0) endGame("OUT OF LIVES");
     }
 
     function endGame(msg) {
@@ -175,6 +154,7 @@
         location.reload();
     }
 
+    // --- GAME LOOP ---
     const cameraControl = new Camera(document.getElementById('input_video'), {
         onFrame: async () => { if(gameActive) await hands.send({image: document.getElementById('input_video')}); },
         width: 480, height: 360
@@ -191,35 +171,33 @@
     function spawnLoop() {
         if (!gameActive) return;
         
-        const isBomb = Math.random() > 0.90; // Reduced bomb spawn (10%)
-        let geom, mat;
-
-        if (isBomb) {
-            // Bomb: Red Pyramid (Cone with 4 radial segments)
-            geom = new THREE.ConeGeometry(0.4, 0.6, 4);
-            mat = new THREE.MeshPhongMaterial({ color: 0xff0000 });
-        } else {
-            geom = new THREE.IcosahedronGeometry(0.35, 1);
-            mat = new THREE.MeshPhongMaterial({ color: 0x00ffff });
-        }
+        const isBomb = Math.random() < bombChance;
+        const geom = isBomb ? new THREE.ConeGeometry(0.4, 0.7, 4) : new THREE.IcosahedronGeometry(0.35, 1);
+        const mat = new THREE.MeshPhongMaterial({ color: isBomb ? 0xff0000 : 0x00ffff });
 
         const mesh = new THREE.Mesh(geom, mat);
         mesh.userData.isBomb = isBomb;
         mesh.position.set((Math.random() - 0.5) * 5, -4, 0);
-        mesh.velocity = new THREE.Vector3((Math.random() - 0.5) * 0.02, 0.11, 0);
+        mesh.velocity = new THREE.Vector3((Math.random() - 0.5) * 0.03, 0.13, 0);
         
         scene.add(mesh);
         targets.push(mesh);
         
-        // Slower spawn rate: 1.2 to 1.8 seconds between objects
-        setTimeout(spawnLoop, 1200 + Math.random() * 600);
+        // Spawn interval gets slightly faster over time
+        const interval = Math.max(600, 1000 - (60 - timeLeft) * 5);
+        setTimeout(spawnLoop, interval);
     }
 
     function startTimer() {
         const ticker = setInterval(() => {
             if (!gameActive) { clearInterval(ticker); return; }
-            if (--timeLeft <= 0) { endGame("TIME UP"); clearInterval(ticker); }
+            timeLeft--;
             document.getElementById('timer').innerText = timeLeft;
+            
+            // Progression: Every second, the bomb chance increases slightly
+            bombChance = Math.min(0.5, 0.1 + (60 - timeLeft) * 0.007);
+
+            if (timeLeft <= 0) { endGame("TIME UP"); clearInterval(ticker); }
         }, 1000);
     }
 
@@ -228,13 +206,14 @@
         for (let i = targets.length - 1; i >= 0; i--) {
             const t = targets[i];
             t.position.add(t.velocity);
-            t.velocity.y -= 0.002;
+            t.velocity.y -= 0.0025;
             t.rotation.y += 0.05;
 
-            // Miss Detection: If a Cyan shape falls past the bottom
             if (t.position.y < -5) {
                 if (!t.userData.isBomb) {
-                    updateScore(-5); // Penalty for missing a target
+                    score = Math.max(0, score - 5);
+                    document.getElementById('score').innerText = `Score: ${score}`;
+                    triggerEffect('tint-orange', 1000); // 1 second orange tint
                 }
                 scene.remove(t);
                 targets.splice(i, 1);
